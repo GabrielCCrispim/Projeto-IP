@@ -1,0 +1,1101 @@
+import pygame
+import sys
+import random
+import math
+import os
+
+# --- Configurações Gerais ---
+WIDTH, HEIGHT = 1280, 720
+FPS = 60
+SCORE_FILE = "scores.txt"
+
+# --- Cores ---
+WHITE = (255, 255, 255)
+BLACK = (20, 20, 20)
+GREEN = (80, 200, 120)
+GREEN_PIPE = (80, 200, 120)
+GREEN_DARK = (30, 100, 30)
+GREEN_LIGHT = (120, 230, 150)
+BROWN = (120, 85, 60)
+BROWN_DARK = (80, 50, 30)
+YELLOW = (255, 210, 50)
+BLUE = (70, 150, 200)
+ORANGE = (255, 160, 40)
+RED_UI = (220, 50, 50)
+
+# Cores Novas
+BUTTON_COLOR = (200, 60, 60)
+BUTTON_HOVER = (230, 90, 90)
+SHIELD_COLOR = (0, 255, 255)
+CLOCK_COLOR = (150, 150, 255)
+GREY_TEXT = (100, 100, 100)
+GOLD_TEXT = (255, 215, 0)
+SILVER_TEXT = (160, 160, 160)
+BRONZE_TEXT = (205, 127, 50)
+BIRD_COLOR = (50, 50, 65)
+
+SKY_DAY = (120, 200, 255)
+SKY_SUNSET = (255, 120, 80)
+SKY_NIGHT = (10, 10, 35)
+
+# Cores das Montanhas
+MOUNTAIN_FAR = (160, 180, 210)  # Azul claro acinzentado (atmosfera)
+MOUNTAIN_NEAR = (110, 125, 155) # Azul mais escuro
+CLOUD_MAIN_COLOR = (240, 248, 255) 
+CLOUD_SHADOW_COLOR = (200, 220, 240)
+
+# --- Padrões de Nuvem (Pixel Art) ---
+CLOUD_PATTERNS = [
+    ["  WW   ", " WWWW  ", "BBBBBB ", "BBBBBB "],
+    ["   WW    ", "  WWWW   ", " BBBBBB  ", "BBBBBBBB ", " BBBBBB  "],
+    [" W   W ", "WWW WWW", "BBBBBBB", " BBBBB "]
+]
+
+# --- Configurações de Jogo ---
+CAPY_X = 180
+CAPY_RADIUS = 24 
+PIPE_WIDTH = 80
+GROUND_HEIGHT = 100
+
+# Física
+GRAVITY = 1500.0
+JUMP_VELOCITY = -420.0
+DIVE_VELOCITY = 700.0
+MAX_DROP_SPEED = 1000.0
+
+# Dificuldade
+PIPE_GAP_DEFAULT = 220
+SPAWN_DISTANCE_START = 500
+INITIAL_SPEED = 400
+MAX_SPEED = 900.0
+
+# Valores Base
+VALOR_FOLHA = 5
+VALOR_AGUAPE = 50
+VALOR_MANGA = 500
+
+# --- Classes ---
+
+class FloatingText:
+    def __init__(self, x, y, text, color):
+        self.x = x
+        self.y = y
+        self.text = text
+        self.color = color
+        self.timer = 0
+        self.max_time = 60 
+        self.font = pygame.font.SysFont(None, 32, bold=True)
+
+    def update(self):
+        self.y -= 1.5 
+        self.timer += 1
+
+    def draw(self, surface):
+        if self.timer < self.max_time:
+            alpha = 255 - int((self.timer / self.max_time) * 255)
+            text_surf = self.font.render(self.text, True, self.color)
+            text_surf.set_alpha(alpha)
+            shadow_surf = self.font.render(self.text, True, BLACK)
+            shadow_surf.set_alpha(alpha)
+            surface.blit(shadow_surf, (self.x + 2, self.y + 2))
+            surface.blit(text_surf, (self.x, self.y))
+
+class Button:
+    def __init__(self, x, y, width, height, text, font, color, hover_color):
+        self.rect = pygame.Rect(x, y, width, height)
+        self.text = text
+        self.font = font
+        self.color = color
+        self.hover_color = hover_color
+        self.is_hovered = False
+
+    def check_hover(self, mouse_pos):
+        self.is_hovered = self.rect.collidepoint(mouse_pos)
+
+    def is_clicked(self, event):
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                return True
+        return False
+
+    def draw(self, surface):
+        color = self.hover_color if self.is_hovered else self.color
+        shadow_rect = self.rect.copy()
+        shadow_rect.y += 4
+        try:
+            pygame.draw.rect(surface, (50, 20, 20), shadow_rect, border_radius=12)
+            pygame.draw.rect(surface, color, self.rect, border_radius=12)
+            pygame.draw.rect(surface, WHITE, self.rect, 2, border_radius=12)
+        except TypeError:
+            pygame.draw.rect(surface, (50, 20, 20), shadow_rect)
+            pygame.draw.rect(surface, color, self.rect)
+            pygame.draw.rect(surface, WHITE, self.rect, 2)
+
+        text_surf = self.font.render(self.text, True, WHITE)
+        text_rect = text_surf.get_rect(center=self.rect.center)
+        surface.blit(text_surf, text_rect)
+
+class Particle:
+    def __init__(self, x, y, color=WHITE, explosive=False):
+        self.x = x
+        self.y = y
+        self.color = color
+        self.radius = random.randint(3, 6)
+        self.life = 255
+        self.decay = random.randint(10, 20)
+        
+        if explosive:
+            speed = random.randint(100, 300)
+            angle = random.uniform(0, 6.28)
+            self.vx = math.cos(angle) * speed
+            self.vy = math.sin(angle) * speed
+            self.decay = random.randint(5, 10)
+        else:
+            self.vx = -random.randint(50, 150)
+            self.vy = random.randint(-50, 50)
+
+    def update(self, dt):
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+        self.life -= self.decay
+        if self.life < 0: self.life = 0
+
+    def draw(self, surface):
+        if self.life > 0:
+            s = pygame.Surface((self.radius*2, self.radius*2), pygame.SRCALPHA)
+            rgba = self.color + (self.life,)
+            pygame.draw.circle(s, rgba, (self.radius, self.radius), self.radius)
+            surface.blit(s, (int(self.x - self.radius), int(self.y - self.radius)))
+
+# --- NOVA CLASSE MONTANHA ---
+class Mountain:
+    def __init__(self, x, layer_type):
+        self.type = layer_type
+        self.x = x
+        
+        if self.type == 'far':
+            self.color = MOUNTAIN_FAR
+            self.width = random.randint(300, 600)
+            self.height = random.randint(250, 450)
+            self.scroll_factor = 0.05 # 5% da velocidade (muito lento)
+            self.y_base = HEIGHT - GROUND_HEIGHT + 20 
+            # Picos mais irregulares
+            self.peak_offset = random.randint(-50, 50)
+        else: # near
+            self.color = MOUNTAIN_NEAR
+            self.width = random.randint(200, 400)
+            self.height = random.randint(100, 250)
+            self.scroll_factor = 0.15 # 15% da velocidade
+            self.y_base = HEIGHT - GROUND_HEIGHT + 10
+            self.peak_offset = 0
+
+    def update(self, dt, game_speed):
+        self.x -= game_speed * self.scroll_factor * dt
+
+    def draw(self, surface):
+        # Desenha um triângulo (montanha)
+        points = [
+            (self.x, self.y_base),  # Canto esquerdo
+            (self.x + self.width // 2 + self.peak_offset, self.y_base - self.height), # Pico
+            (self.x + self.width, self.y_base) # Canto direito
+        ]
+        pygame.draw.polygon(surface, self.color, points)
+
+class Cloud:
+    def __init__(self, x=None):
+        self.x = x if x is not None else random.randint(WIDTH, WIDTH + 400)
+        self.y = random.randint(20, HEIGHT // 2)
+        self.speed = random.randint(15, 40)
+        self.pattern = random.choice(CLOUD_PATTERNS)
+        self.pixel_size = random.randint(25, 45)
+        self.width = len(self.pattern[0]) * self.pixel_size
+
+    def update(self, dt):
+        self.x -= self.speed * dt
+
+    def draw(self, surface):
+        for row_index, row in enumerate(self.pattern):
+            for col_index, char in enumerate(row):
+                rect_x = self.x + col_index * self.pixel_size
+                rect_y = self.y + row_index * self.pixel_size
+                rect = pygame.Rect(rect_x, rect_y, self.pixel_size, self.pixel_size)
+                
+                if char == 'W':
+                    pygame.draw.rect(surface, CLOUD_MAIN_COLOR, rect)
+                elif char == 'B':
+                    pygame.draw.rect(surface, CLOUD_SHADOW_COLOR, rect)
+
+class Bird:
+    def __init__(self):
+        self.direction = random.choice([-1, 1])
+        if self.direction == 1: self.x = -50
+        else: self.x = WIDTH + 50
+        self.y = random.randint(30, HEIGHT // 3)
+        self.speed = random.randint(70, 140)
+        self.size = random.randint(10, 20)
+        self.flap_timer = 0
+        self.wing_state = 0 
+
+    def update(self, dt):
+        self.x += self.speed * self.direction * dt
+        self.flap_timer += dt
+        if self.flap_timer > 0.2:
+            self.flap_timer = 0
+            self.wing_state = 1 - self.wing_state
+
+    def draw(self, surface):
+        cx, cy = self.x, self.y
+        wing_span = self.size
+        if self.wing_state == 0:
+            points = [(cx - wing_span, cy - 5), (cx, cy + 2), (cx + wing_span, cy - 5)]
+        else:
+            points = [(cx - wing_span, cy - 2), (cx, cy + 4), (cx + wing_span, cy - 2)]
+        pygame.draw.lines(surface, BIRD_COLOR, False, points, 3)
+
+class PowerUp:
+    def __init__(self, x, pipe_gap_mid, relative_y):
+        self.type = random.choice(["shield", "clock"])
+        self.x = x
+        self.rel_y = relative_y 
+        self.y = pipe_gap_mid + self.rel_y
+        self.radius = 18
+        self.collected = False
+        self.rect = pygame.Rect(x - self.radius, self.y - self.radius, self.radius*2, self.radius*2)
+        self.float_offset = 0
+        self.pulse_timer = 0
+
+    def update(self, dt, speed, current_pipe_mid):
+        self.x -= speed * dt
+        self.float_offset += 5 * dt
+        self.pulse_timer += dt * 3
+        base_y = current_pipe_mid + self.rel_y
+        self.y = base_y + math.sin(self.float_offset) * 3
+        self.rect.x = int(self.x - self.radius)
+        self.rect.y = int(self.y - self.radius)
+
+    def draw(self, surface):
+        if self.collected: return
+        pulse = 2 + math.sin(self.pulse_timer) * 2
+        pygame.draw.circle(surface, SHIELD_COLOR, (int(self.x), int(self.y)), self.radius)
+        pygame.draw.circle(surface, WHITE, (int(self.x), int(self.y)), self.radius + int(pulse), 1)
+        pygame.draw.circle(surface, WHITE, (int(self.x), int(self.y)), self.radius - 4, 1)
+        font = pygame.font.SysFont(None, 24)
+        txt = font.render("S", True, BLACK)
+        surface.blit(txt, txt.get_rect(center=(int(self.x), int(self.y))))
+        if self.type == "clock":
+            pygame.draw.circle(surface, (180, 180, 255), (int(self.x), int(self.y)), self.radius)
+            pygame.draw.circle(surface, WHITE, (int(self.x), int(self.y)), self.radius, 2)
+
+            # ponteiros
+            pygame.draw.line(surface, BLACK,
+                            (self.x, self.y),
+                            (self.x, self.y - 8), 2)
+            pygame.draw.line(surface, BLACK,
+                            (self.x, self.y),
+                            (self.x + 6, self.y), 2)
+
+
+class Collectible:
+    def __init__(self, item_type, x, pipe_gap_mid, relative_y):
+        self.type = item_type
+        self.x = x
+        self.rel_y = relative_y 
+        self.y = pipe_gap_mid + self.rel_y
+        self.collected = False
+        self.pulse_timer = random.random() * 10
+        
+        if self.type == "folha":
+            self.radius = 16
+            self.base_value = VALOR_FOLHA
+        elif self.type == "aguape":
+            self.radius = 20
+            self.base_value = VALOR_AGUAPE
+        else:
+            self.radius = 24
+            self.base_value = VALOR_MANGA
+
+        self.rect = pygame.Rect(int(self.x - self.radius), int(self.y - self.radius),
+                               int(self.radius*2), int(self.radius*2))
+
+    def update_position(self, x, current_pipe_mid):
+        self.x = x
+        self.y = current_pipe_mid + self.rel_y
+        self.rect.x = int(self.x - self.radius)
+        self.rect.y = int(self.y - self.radius)
+
+    def draw(self, surface):
+        if self.collected: return
+        self.pulse_timer += 0.1
+        pulse = math.sin(self.pulse_timer) * 2
+        draw_rad = self.radius + pulse
+        cx, cy = int(self.x), int(self.y)
+
+        if self.type == "folha":
+            points = [(cx, cy - draw_rad), (cx + draw_rad, cy + draw_rad/2), (cx, cy + draw_rad), (cx - draw_rad, cy + draw_rad/2)]
+            pygame.draw.polygon(surface, GREEN, points)
+            pygame.draw.polygon(surface, WHITE, points, 1)
+        elif self.type == "aguape":
+            pygame.draw.circle(surface, BLUE, (cx, cy), draw_rad)
+            pygame.draw.circle(surface, (100, 200, 255), (cx, cy), draw_rad-5)
+            pygame.draw.circle(surface, YELLOW, (cx, cy), 4) 
+        else: 
+            rect_manga = pygame.Rect(cx - draw_rad*0.8, cy - draw_rad, draw_rad*1.6, draw_rad*2)
+            pygame.draw.ellipse(surface, ORANGE, rect_manga)
+            pygame.draw.ellipse(surface, (255, 200, 100), (cx - draw_rad*0.4, cy - draw_rad*0.6, draw_rad*0.5, draw_rad*0.8))
+            pygame.draw.line(surface, BROWN, (cx, cy - draw_rad), (cx, cy - draw_rad - 5), 3)
+
+class Capivara:
+    def __init__(self, x=CAPY_X, y=HEIGHT//2):
+        self.x = x
+        self.y = y
+        self.radius = CAPY_RADIUS
+        self.vel = 0.0
+        self.alive = True
+        self.rotation = 0
+        self.has_shield = False
+        self.immunity_timer = 0.0
+
+    def jump(self):
+        self.vel = JUMP_VELOCITY
+    
+    def dive(self):
+        self.vel = DIVE_VELOCITY
+
+    def update(self, dt):
+        self.vel += GRAVITY * dt
+        if self.vel > MAX_DROP_SPEED:
+            self.vel = MAX_DROP_SPEED
+        self.y += self.vel * dt
+        if self.y < self.radius:
+            self.y = self.radius
+            self.vel = 0
+            
+        target_rot = max(-30, min(30, -self.vel * 0.05))
+        self.rotation += (target_rot - self.rotation) * 0.1
+
+        if self.immunity_timer > 0: self.immunity_timer -= dt
+
+    def get_rect(self):
+        hitbox_radius = self.radius - 4
+        return pygame.Rect(int(self.x - hitbox_radius), int(self.y - hitbox_radius),
+                           int(hitbox_radius*2), int(hitbox_radius*2))
+
+    def draw(self, surface):
+        if self.immunity_timer > 0 and int(self.immunity_timer * 15) % 2 == 0: return
+
+        if self.has_shield:
+            pygame.draw.circle(surface, (0, 255, 255, 100), (int(self.x), int(self.y)), self.radius + 12, 3)
+
+        body_rect = pygame.Rect(self.x - 25, self.y - 20, 50, 40)
+        pygame.draw.ellipse(surface, BROWN, body_rect)
+        head_pos = (int(self.x + 15), int(self.y - 10))
+        pygame.draw.circle(surface, BROWN, head_pos, 16)
+        
+        focinho_rect = pygame.Rect(self.x + 25, self.y - 12, 10, 12)
+        try: pygame.draw.rect(surface, BROWN_DARK, focinho_rect, border_top_right_radius=5, border_bottom_right_radius=5)
+        except TypeError: pygame.draw.rect(surface, BROWN_DARK, focinho_rect)
+
+        pygame.draw.circle(surface, BROWN_DARK, (int(self.x + 5), int(self.y - 22)), 6)
+        pygame.draw.circle(surface, WHITE, (int(self.x + 18), int(self.y - 14)), 5)
+        pygame.draw.circle(surface, BLACK, (int(self.x + 20), int(self.y - 14)), 2)
+
+        wing_rect = pygame.Rect(self.x - 15, self.y - 15, 20, 15)
+        pygame.draw.ellipse(surface, (230, 230, 230), wing_rect)
+        pygame.draw.ellipse(surface, BLACK, wing_rect, 1)
+
+
+class Pipe:
+    def __init__(self, x, gap_size, multiplier):
+        self.x = x
+        self.width = PIPE_WIDTH
+        self.passed = False
+        self.gap = gap_size
+        margin = 80
+        self.gap_mid = random.randint(margin + self.gap//2, HEIGHT - GROUND_HEIGHT - margin - self.gap//2)
+        self.top_y = self.gap_mid - self.gap//2
+        self.bottom_y = self.gap_mid + self.gap//2
+        self.collectibles = []
+        self.powerups = []
+        self.moving = False
+        self.move_speed = 0
+        self.move_dir = 1
+        
+        if multiplier >= 3 and random.random() < 0.6: 
+            self.moving = True
+            self.move_speed = random.randint(40, 120)
+            self.move_dir = random.choice([-1, 1])
+
+        cx = self.x + self.width / 2
+        chance = random.random()
+        
+        if random.random() < 0.05 and not self.moving:
+            self.powerups.append(PowerUp(cx, self.gap_mid, 0))
+        else:
+            if chance < 0.10: 
+                item_type = "manga"
+                offset = (self.gap // 2) - 30 
+                direction = random.choice([-1, 1])
+                self.collectibles.append(Collectible(item_type, cx, self.gap_mid, offset * direction))
+            elif chance < 0.40:
+                item_type = "aguape"
+                offset = random.choice([-30, 30, 0])
+                self.collectibles.append(Collectible(item_type, cx, self.gap_mid, offset))
+            elif chance < 0.90:
+                item_type = "folha"
+                for i in [-1, 0, 1]:
+                    offset = i * 30
+                    self.collectibles.append(Collectible(item_type, cx, self.gap_mid, offset))
+
+    def update(self, dt, speed):
+        self.x -= speed * dt
+        if self.moving:
+            self.gap_mid += self.move_speed * self.move_dir * dt
+            if random.random() < 0.02: self.move_speed = random.randint(40, 150)
+            margin = 80
+            top_limit = margin + self.gap//2
+            bot_limit = HEIGHT - GROUND_HEIGHT - margin - self.gap//2
+            if self.gap_mid < top_limit:
+                self.gap_mid = top_limit
+                self.move_dir = 1
+                self.move_speed = random.randint(50, 100)
+            elif self.gap_mid > bot_limit:
+                self.gap_mid = bot_limit
+                self.move_dir = -1
+                self.move_speed = random.randint(50, 100)
+            self.top_y = self.gap_mid - self.gap//2
+            self.bottom_y = self.gap_mid + self.gap//2
+
+        cx = self.x + self.width / 2
+        for c in self.collectibles:
+            if not c.collected: c.update_position(cx, self.gap_mid)
+        for p in self.powerups:
+            if not p.collected: p.update(dt, speed, self.gap_mid)
+
+    def off_screen(self): return self.x + self.width < -50
+    def collides_with(self, rect):
+        top_rect = pygame.Rect(int(self.x), 0, self.width, int(self.top_y))
+        bottom_rect = pygame.Rect(int(self.x), int(self.bottom_y), self.width,
+                                 int(HEIGHT - self.bottom_y - GROUND_HEIGHT))
+        return rect.colliderect(top_rect) or rect.colliderect(bottom_rect)
+
+    def draw(self, surface):
+        top_rect = pygame.Rect(int(self.x), 0, self.width, int(self.top_y))
+        pygame.draw.rect(surface, GREEN_PIPE, top_rect)
+        pygame.draw.rect(surface, GREEN_DARK, top_rect, 4)
+        pygame.draw.rect(surface, GREEN_LIGHT, (self.x + 10, 0, 10, self.top_y))
+        
+        cap_height = 25
+        top_cap = pygame.Rect(self.x - 5, self.top_y - cap_height, self.width + 10, cap_height)
+        pygame.draw.rect(surface, GREEN_PIPE, top_cap)
+        pygame.draw.rect(surface, GREEN_DARK, top_cap, 4)
+
+        bottom_rect = pygame.Rect(int(self.x), int(self.bottom_y), self.width,
+                                 int(HEIGHT - self.bottom_y - GROUND_HEIGHT))
+        pygame.draw.rect(surface, GREEN_PIPE, bottom_rect)
+        pygame.draw.rect(surface, GREEN_DARK, bottom_rect, 4)
+        pygame.draw.rect(surface, GREEN_LIGHT, (self.x + 10, self.bottom_y, 10, HEIGHT))
+        
+        bot_cap = pygame.Rect(self.x - 5, self.bottom_y, self.width + 10, cap_height)
+        pygame.draw.rect(surface, GREEN_PIPE, bot_cap)
+        pygame.draw.rect(surface, GREEN_DARK, bot_cap, 4)
+
+        for c in self.collectibles: c.draw(surface)
+        for p in self.powerups: p.draw(surface)
+
+class Ground:
+    def __init__(self):
+        self.y = HEIGHT - GROUND_HEIGHT
+        self.x1 = 0
+        self.x2 = WIDTH
+
+    def update(self, dt, current_speed):
+        dx = current_speed * dt
+        self.x1 -= dx
+        self.x2 -= dx
+        if self.x1 + WIDTH <= 0: self.x1 = self.x2 + WIDTH
+        if self.x2 + WIDTH <= 0: self.x2 = self.x1 + WIDTH
+
+    def draw(self, surface):
+        pygame.draw.rect(surface, BROWN, (0, self.y, WIDTH, GROUND_HEIGHT))
+        offset1 = int(self.x1 % 40)
+        offset2 = int(self.x2 % 40)
+        for i in range(0, WIDTH, 40):
+            pygame.draw.circle(surface, BROWN_DARK, (i + offset1, self.y + 30), 4)
+            pygame.draw.circle(surface, BROWN_DARK, (i + offset2, self.y + 60), 6)
+        pygame.draw.rect(surface, GREEN_PIPE, (0, self.y, WIDTH, 15))
+        pygame.draw.line(surface, GREEN_LIGHT, (0, self.y), (WIDTH, self.y), 3)
+
+
+class Game:
+    def __init__(self):
+        pygame.init()
+        pygame.display.set_caption("Capivara Voadora")
+        self.entering_name = False
+        self.player_name = ""
+        self.saved_this_session = False
+        self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
+        self.clock = pygame.time.Clock()
+        self.font = pygame.font.SysFont(None, 40)
+        self.small_font = pygame.font.SysFont(None, 24)
+        self.big_font = pygame.font.SysFont(None, 60)
+        self.btn_exit_start = Button(WIDTH - 140, 20, 120, 50, "SAIR", self.font, BUTTON_COLOR, BUTTON_HOVER)
+        self.btn_exit_over = Button(WIDTH // 2 - 70, HEIGHT // 2 + 150, 140, 50, "SAIR", self.font, BUTTON_COLOR, BUTTON_HOVER)
+        self.top_scores = self.load_scores()
+        self.reset()
+
+    def load_scores(self):
+        if not os.path.exists(SCORE_FILE):
+            return []
+
+        scores = []
+        try:
+            with open(SCORE_FILE, "r") as f:
+                for line in f:
+                    if "," in line:
+                        user, score = line.strip().split(",")
+                        scores.append({"user": user, "score": int(score)})
+        except:
+            pass
+        return sorted(scores, key=lambda x: x["score"], reverse=True)[:10]
+
+    def save_score(self, user, score):
+        self.top_scores.append({"user": user, "score": score})
+        self.top_scores = sorted(self.top_scores, key=lambda x: x["score"], reverse=True)[:10]
+
+        try:
+            with open(SCORE_FILE, "w") as f:
+                for s in self.top_scores:
+                    f.write(f"{s['user']},{s['score']}\n")
+        except:
+            pass
+
+    def is_new_record(self, score):
+        if len(self.top_scores) < 10:
+            return True
+        return score > self.top_scores[-1]["score"]
+
+    def draw_blur_background(self):
+        small = pygame.transform.smoothscale(self.screen, (WIDTH // 10, HEIGHT // 10))
+        blur = pygame.transform.smoothscale(small, (WIDTH, HEIGHT))
+        self.screen.blit(blur, (0, 0))
+
+    def draw_name_input(self):
+        self.draw_game()
+        self.draw_blur_background() 
+
+        panel = pygame.Surface((500, 260), pygame.SRCALPHA)
+        panel.fill((255, 255, 255, 230))
+        rect = panel.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+        self.screen.blit(panel, rect)
+
+        title = self.big_font.render("PARABÉNS!", True, BLACK)
+        self.screen.blit(title, title.get_rect(center=(WIDTH//2, HEIGHT//2 - 80)))
+
+        score_txt = self.font.render(f"Score: {self.score}", True, BLACK)
+        self.screen.blit(score_txt, score_txt.get_rect(center=(WIDTH//2, HEIGHT//2 - 40)))
+
+        prompt = self.small_font.render("Digite seu User Cin:", True, GREY_TEXT)
+        self.screen.blit(prompt, prompt.get_rect(center=(WIDTH//2, HEIGHT//2)))
+
+        name_box = pygame.Rect(WIDTH//2 - 120, HEIGHT//2 + 20, 240, 40)
+        pygame.draw.rect(self.screen, WHITE, name_box, border_radius=6)
+        pygame.draw.rect(self.screen, BLACK, name_box, 2, border_radius=6)
+
+        name_txt = self.font.render(self.player_name.upper(), True, BLACK)
+        self.screen.blit(name_txt, name_txt.get_rect(center=name_box.center))
+
+        hint = self.small_font.render("ENTER para confirmar", True, GREY_TEXT)
+        self.screen.blit(hint, hint.get_rect(center=(WIDTH//2, HEIGHT//2 + 80)))
+
+
+    def interpolate_color(self, start_color, end_color, factor):
+        return (
+            int(start_color[0] + (end_color[0] - start_color[0]) * factor),
+            int(start_color[1] + (end_color[1] - start_color[1]) * factor),
+            int(start_color[2] + (end_color[2] - start_color[2]) * factor),
+        )
+
+    def get_sky_color(self):
+        if self.time < 30:
+            factor = self.time / 30.0
+            return self.interpolate_color(SKY_DAY, SKY_SUNSET, factor)
+        elif self.time < 60:
+            factor = (self.time - 30) / 30.0
+            return self.interpolate_color(SKY_SUNSET, SKY_NIGHT, factor)
+        else: return SKY_NIGHT
+
+    def reset(self):
+        self.capy = Capivara()
+        self.ground = Ground()
+        self.pipes = []
+        self.particles = []
+        self.floating_texts = [] 
+        self.clouds = [Cloud(random.randint(0, WIDTH)) for _ in range(5)]
+        self.birds = [Bird() for _ in range(3)]
+        self.entering_name = False
+        self.player_name = ""
+        self.saved_this_session = False
+        
+        # Gera Montanhas Iniciais (Fundo e Frente)
+        self.mountains_far = []
+        self.mountains_near = []
+        
+        # Preencher o fundo inicialmente
+        current_x = -200
+        while current_x < WIDTH + 200:
+            m = Mountain(current_x, 'far')
+            self.mountains_far.append(m)
+            current_x += m.width - random.randint(50, 100) # Sobreposição
+            
+        current_x = -200
+        while current_x < WIDTH + 200:
+            m = Mountain(current_x, 'near')
+            self.mountains_near.append(m)
+            current_x += m.width - random.randint(30, 80) # Sobreposição
+        
+        self.score = 0
+        self.counts = {"folha": 0, "aguape": 0, "manga": 0}
+        self.game_over = False
+        self.started = False
+        self.saved_this_session = False
+        self.time = 0.0
+        self.shake_duration = 0 
+        self.level_up_flash = 0 
+        self.base_speed = 300
+        self.current_speed = INITIAL_SPEED
+        self.multiplier = 1
+        first_pipe = Pipe(WIDTH + 50, PIPE_GAP_DEFAULT, self.multiplier)
+        self.pipes.append(first_pipe)
+        # relogio
+        self.slow_timer = 0.0
+        self.slow_duration = 10.0  # segundos
+        self.slow_factor = 2/3     # 2/3 da velocidade normal
+        # escudo
+        self.shield_timer = 0.0
+        self.shield_duration = 25.0
+
+    def spawn_pipe(self):
+        gap = max(160, PIPE_GAP_DEFAULT - (self.multiplier * 5))
+        new_pipe = Pipe(WIDTH + 50, gap, self.multiplier)
+        self.pipes.append(new_pipe)
+
+    def handle_events(self):
+        mouse_pos = pygame.mouse.get_pos()
+
+        if not self.started:
+            self.btn_exit_start.check_hover(mouse_pos)
+        if self.game_over:
+            self.btn_exit_over.check_hover(mouse_pos)
+
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            # --------- INPUT DE NOME (TEM PRIORIDADE) ---------
+            if self.entering_name:
+                if e.type == pygame.KEYDOWN:
+                    if e.key == pygame.K_RETURN and self.player_name:
+                        self.save_score(self.player_name.upper(), self.score)
+                        self.saved_this_session = True
+                        self.entering_name = False
+
+                    elif e.key == pygame.K_BACKSPACE:
+                        self.player_name = self.player_name[:-1]
+
+                    elif len(self.player_name) < 8:
+                        if e.unicode.isalnum():
+                            self.player_name += e.unicode
+                continue  # MUITO IMPORTANTE: bloqueia resto do input
+
+            # --------- BOTÕES ---------
+            if not self.started and self.btn_exit_start.is_clicked(e):
+                pygame.quit()
+                sys.exit()
+
+            if self.game_over and self.btn_exit_over.is_clicked(e):
+                pygame.quit()   
+                sys.exit()
+
+            # --------- TECLADO ---------
+            if e.type == pygame.KEYDOWN:
+                if e.key in (pygame.K_SPACE, pygame.K_UP):
+                    if not self.started:
+                        self.started = True
+                        self.capy.jump()
+                    elif self.game_over and not self.entering_name:
+                        self.reset()
+                    else:
+                        self.capy.jump()
+                        for _ in range(4):
+                            self.particles.append(Particle(self.capy.x, self.capy.y + 10))
+
+                elif e.key == pygame.K_r and self.game_over:
+                    self.reset()
+
+                elif e.key in (pygame.K_DOWN, pygame.K_s) and self.started and not self.game_over:
+                    self.capy.dive()
+
+            # --------- MOUSE ---------
+            elif e.type == pygame.MOUSEBUTTONDOWN:
+                clicked_ui = False
+                if not self.started and self.btn_exit_start.rect.collidepoint(e.pos):
+                    clicked_ui = True
+                if self.game_over and self.btn_exit_over.rect.collidepoint(e.pos):
+                    clicked_ui = True
+
+                if not clicked_ui:
+                    if not self.started:
+                        self.started = True
+                        self.capy.jump()
+                    elif self.game_over:
+                        self.reset()
+                    else:
+                        self.capy.jump()
+
+
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            if not self.started and self.btn_exit_start.is_clicked(e):
+                pygame.quit()
+                sys.exit()
+            if self.game_over and self.btn_exit_over.is_clicked(e):
+                pygame.quit()
+                sys.exit()
+            if e.type == pygame.KEYDOWN:
+                if e.key == pygame.K_SPACE or e.key == pygame.K_UP:
+                    if not self.started:
+                        self.started = True
+                        self.capy.jump()
+                    elif self.game_over: self.reset()
+                    else:
+                        self.capy.jump()
+                        for _ in range(4): self.particles.append(Particle(self.capy.x, self.capy.y+10))
+                elif e.key == pygame.K_r and self.game_over: self.reset()
+                elif (e.key == pygame.K_DOWN or e.key == pygame.K_s) and self.started and not self.game_over:
+                    self.capy.dive()
+            elif e.type == pygame.MOUSEBUTTONDOWN:
+                clicked_ui = False
+                if not self.started and self.btn_exit_start.rect.collidepoint(e.pos): clicked_ui = True
+                if self.game_over and self.btn_exit_over.rect.collidepoint(e.pos): clicked_ui = True
+                if not clicked_ui:
+                    if not self.started:
+                        self.started = True
+                        self.capy.jump()
+                    elif self.game_over: self.reset()
+                    else: self.capy.jump()
+
+    def update(self, dt):
+        # Atualiza Fundo (Montanhas, Nuvens, Pássaros)
+        
+        # Montanhas (Longe)
+        for m in self.mountains_far: m.update(dt, self.current_speed)
+        # Remove se saiu da tela e adiciona nova no fim
+        if self.mountains_far[0].x + self.mountains_far[0].width < -100:
+            removed = self.mountains_far.pop(0)
+            # Adiciona nova
+            last_x = self.mountains_far[-1].x + self.mountains_far[-1].width
+            new_m = Mountain(last_x - random.randint(50, 100), 'far')
+            self.mountains_far.append(new_m)
+
+        # Montanhas (Perto)
+        for m in self.mountains_near: m.update(dt, self.current_speed)
+        if self.mountains_near[0].x + self.mountains_near[0].width < -100:
+            removed = self.mountains_near.pop(0)
+            last_x = self.mountains_near[-1].x + self.mountains_near[-1].width
+            new_m = Mountain(last_x - random.randint(30, 80), 'near')
+            self.mountains_near.append(new_m)
+
+        for c in self.clouds:
+            c.update(dt)
+            if c.x + c.width < 0:
+                self.clouds.remove(c)
+                self.clouds.append(Cloud())
+        for b in self.birds:
+            b.update(dt)
+            if b.x < -100 or b.x > WIDTH + 100: self.birds.remove(b)
+        if random.random() < 0.005 and len(self.birds) < 5: self.birds.append(Bird())
+
+        if not self.started:
+            self.ground.update(dt, self.current_speed)
+            self.capy.y = HEIGHT//2 + math.sin(pygame.time.get_ticks() * 0.003) * 20
+            return
+
+        if (self.game_over and not self.saved_this_session and not self.entering_name and self.is_new_record(self.score)):
+            self.entering_name = True
+        if self.game_over:
+            if self.shake_duration > 0:
+                self.shake_duration -= 1
+            return
+
+
+        self.time += dt
+        # efeito relogio
+        speed_multiplier = 1.0
+        if self.slow_timer > 0:
+            self.slow_timer -= dt
+            speed_multiplier = self.slow_factor
+            if self.slow_timer < 0:
+                self.slow_timer = 0
+        # efeito escudo
+        if self.shield_timer > 0:
+            self.shield_timer -= dt
+            # Quando o tempo acabar, desativa o escudo
+            if self.shield_timer <= 0:
+                self.shield_timer = 0
+                self.capy.has_shield = False
+        if self.shake_duration > 0: self.shake_duration -= 1
+        if self.level_up_flash > 0: self.level_up_flash -= 5
+        if self.current_speed < MAX_SPEED: self.current_speed += 4 * dt
+        new_multiplier = 1 + int(self.time // 10)
+        if new_multiplier > self.multiplier:
+            self.multiplier = new_multiplier
+            self.level_up_flash = 255 
+        
+        self.capy.update(dt)
+        self.ground.update(dt, self.current_speed)
+        if random.random() < 0.3: self.particles.append(Particle(self.capy.x - 10, self.capy.y))
+        for p in list(self.particles):
+            p.update(dt)
+            if p.life <= 0: self.particles.remove(p)
+        for ft in list(self.floating_texts):
+            ft.update()
+            if ft.timer >= ft.max_time: self.floating_texts.remove(ft)
+
+        if self.pipes:
+            last_pipe = self.pipes[-1]
+            dist = max(350, SPAWN_DISTANCE_START - (self.time * 3))
+            if last_pipe.x < WIDTH - dist: self.spawn_pipe()
+
+        for pipe in list(self.pipes):
+            effective_speed = self.current_speed * speed_multiplier
+            if effective_speed > INITIAL_SPEED:
+                effective_speed = INITIAL_SPEED
+            pipe.update(dt, effective_speed)
+            if pipe.collides_with(self.capy.get_rect()):
+                if self.capy.immunity_timer <= 0:
+                    if self.capy.has_shield:
+                        self.capy.has_shield = False
+                        self.capy.immunity_timer = 2.0
+                        self.capy.y -= 10
+                        self.shake_duration = 10 
+                        for _ in range(10): self.particles.append(Particle(self.capy.x, self.capy.y, SHIELD_COLOR, True))
+                    else:
+                        self.game_over = True
+                        self.capy.alive = False
+            for p in pipe.powerups:
+                if not p.collected and p.rect.colliderect(self.capy.get_rect()):
+                    p.collected = True
+                    if p.type == "shield":
+                        self.capy.has_shield = True
+                        self.shield_timer = self.shield_duration # reinicia o tempo
+                        self.floating_texts.append(FloatingText(self.capy.x, self.capy.y - 40, "ESCUDO!", SHIELD_COLOR))
+                    elif p.type == "clock":
+                        self.slow_timer = self.slow_duration
+                        self.floating_texts.append(FloatingText(self.capy.x, self.capy.y - 40, "TEMPO LENTO!", CLOCK_COLOR))
+            for c in pipe.collectibles:
+                if not c.collected and c.rect.colliderect(self.capy.get_rect()):
+                    c.collected = True
+                    points = c.base_value * self.multiplier
+                    self.score += points
+                    self.counts[c.type] += 1
+                    color = WHITE
+                    if c.type == "manga": 
+                        color = GOLD_TEXT
+                        for _ in range(15):
+                            col = random.choice([RED_UI, YELLOW, ORANGE, WHITE])
+                            self.particles.append(Particle(c.x, c.y, col, True))
+                    elif c.type == "aguape": color = BLUE
+                    elif c.type == "folha": color = GREEN
+                    self.floating_texts.append(FloatingText(self.capy.x, self.capy.y - 30, f"+{points}", color))
+            if pipe.off_screen(): self.pipes.remove(pipe)
+
+        if self.capy.y + self.capy.radius >= HEIGHT - GROUND_HEIGHT:
+            self.capy.y = HEIGHT - GROUND_HEIGHT - self.capy.radius
+            self.game_over = True
+            self.capy.alive = False
+            self.shake_duration = 20
+        if (self.game_over and not self.saved_this_session and not self.entering_name and self.is_new_record(self.score)):
+            self.entering_name = True
+
+    def draw_hud_ingame(self):
+        hud_bg = pygame.Surface((200, 150), pygame.SRCALPHA)
+        pygame.draw.rect(hud_bg, (255, 255, 255, 180), hud_bg.get_rect(), border_radius=10)
+        self.screen.blit(hud_bg, (10, 10))
+        score_surf = self.font.render(f"Score: {self.score}", True, BLACK)
+        self.screen.blit(score_surf, (20, 20))
+        mult_text = f"BONUS x{self.multiplier}"
+        color = RED_UI if self.multiplier > 1 else (60, 60, 60)
+        mult_surf = self.font.render(mult_text, True, color)
+        self.screen.blit(mult_surf, (WIDTH - mult_surf.get_width() - 20, 20))
+        spd_text = self.small_font.render(f"Velocidade: {int(self.current_speed)}", True, GREY_TEXT)
+        self.screen.blit(spd_text, (WIDTH - spd_text.get_width() - 20, 55))
+        panel_x = 20
+        panel_y = 60
+        pygame.draw.circle(self.screen, GREEN, (panel_x + 10, panel_y + 10), 10)
+        txt_f = self.small_font.render(f"x {self.counts['folha']}", True, BLACK)
+        self.screen.blit(txt_f, (panel_x + 30, panel_y + 2))
+        pygame.draw.circle(self.screen, BLUE, (panel_x + 10, panel_y + 40), 10)
+        txt_a = self.small_font.render(f"x {self.counts['aguape']}", True, BLACK)
+        self.screen.blit(txt_a, (panel_x + 30, panel_y + 32))
+        pygame.draw.circle(self.screen, ORANGE, (panel_x + 10, panel_y + 70), 10)
+        txt_m = self.small_font.render(f"x {self.counts['manga']}", True, BLACK)
+        self.screen.blit(txt_m, (panel_x + 30, panel_y + 62))
+        # hud relogio
+        if self.slow_timer > 0:
+            txt = self.small_font.render(
+                f"TEMPO LENTO: {int(self.slow_timer)}s",
+                True,
+                (70, 20, 130)
+            )
+            self.screen.blit(txt, (20, 170))
+        # hud escudo
+        if self.shield_timer > 0:
+            txt = self.small_font.render(
+                f"ESCUDO: {int(self.shield_timer)}s",
+                True,
+                SHIELD_COLOR
+            )
+            self.screen.blit(txt, (20, 195))
+
+    def draw_start(self):
+        self.screen.fill(SKY_DAY)
+        # Desenha Fundo
+        for m in self.mountains_far: m.draw(self.screen)
+        for m in self.mountains_near: m.draw(self.screen)
+        for c in self.clouds: c.draw(self.screen)
+        for b in self.birds: b.draw(self.screen)
+        self.ground.draw(self.screen)
+        self.capy.draw(self.screen)
+        
+        title = self.big_font.render("Capivara Voadora", True, BLACK)
+        title_shadow = self.big_font.render("Capivara Voadora", True, (200, 200, 200))
+        center_x = WIDTH//2
+        title_rect = title.get_rect(center=(center_x, HEIGHT//3))
+        self.screen.blit(title_shadow, (title_rect.x+2, title_rect.y+2))
+        self.screen.blit(title, title_rect)
+        hint = self.font.render("Pressione SPACE", True, (50,50,50))
+        self.screen.blit(hint, hint.get_rect(center=(center_x, HEIGHT//3 + 60)))
+        hint2 = self.small_font.render("Seta BAIXO = Mergulhar", True, RED_UI)
+        self.screen.blit(hint2, hint2.get_rect(center=(center_x, HEIGHT//3 + 90)))
+        board_y = HEIGHT//2 + 50
+        header = self.small_font.render("- TOP RECORDES -", True, BLACK)
+        self.screen.blit(header, header.get_rect(center=(center_x, board_y - 30)))
+        if not self.top_scores:
+            txt = self.small_font.render("Sem recordes ainda...", True, GREY_TEXT)
+            self.screen.blit(txt, txt.get_rect(center=(center_x, board_y)))
+        else:
+            left_x = center_x - 260
+            right_x = center_x + 40
+            start_y = board_y
+
+            for i, entry in enumerate(self.top_scores):
+                col_x = left_x if i < 5 else right_x
+                y = start_y + (i % 5) * 26
+                if i == 0:
+                    color = GOLD_TEXT
+                elif i == 1:
+                    color = SILVER_TEXT
+                elif i == 2:
+                    color = BRONZE_TEXT
+                else:
+                    color = BLACK
+
+                txt = self.small_font.render(
+                    f"{i+1:>2}. {entry['user']:<8} {entry['score']}",
+                    True,
+                    color
+                )
+                self.screen.blit(txt, (col_x, y))
+
+
+
+    def draw_game(self):
+        self.screen.fill(self.get_sky_color())
+        
+        shake_x = 0
+        shake_y = 0
+        if self.shake_duration > 0:
+            shake_x = random.randint(-4, 4)
+            shake_y = random.randint(-4, 4)
+        
+        if self.time < 50:
+            sun_y = 100 + int(self.time * 5)
+            s = pygame.Surface((200, 200), pygame.SRCALPHA)
+            pygame.draw.circle(s, (255, 255, 200, 50), (100, 100), 80)
+            self.screen.blit(s, (WIDTH - 250 + shake_x, sun_y - 100 + shake_y))
+            pygame.draw.circle(self.screen, YELLOW, (WIDTH - 150 + shake_x, sun_y + shake_y), 50)
+        else:
+            random.seed(int(self.time))
+            for _ in range(20):
+                pygame.draw.circle(self.screen, WHITE, (random.randint(0, WIDTH), random.randint(0, HEIGHT//2)), 2)
+            random.seed()
+            pygame.draw.circle(self.screen, (240, 240, 255), (WIDTH - 150, 100), 40)
+
+        # Ordem de Desenho do Fundo
+        for m in self.mountains_far: m.draw(self.screen)
+        for m in self.mountains_near: m.draw(self.screen)
+        for c in self.clouds: c.draw(self.screen)
+        for b in self.birds: b.draw(self.screen)
+        
+        for pipe in self.pipes: pipe.draw(self.screen)
+        for p in self.particles: p.draw(self.screen)
+        for ft in self.floating_texts: ft.draw(self.screen)
+        self.capy.draw(self.screen)
+        self.ground.draw(self.screen)
+        self.draw_hud_ingame()
+        
+        if self.level_up_flash > 0:
+            flash_surf = pygame.Surface((WIDTH, HEIGHT))
+            flash_surf.fill(WHITE)
+            flash_surf.set_alpha(self.level_up_flash)
+            self.screen.blit(flash_surf, (0, 0))
+
+    def draw_game_over(self):
+        self.draw_game()
+        overlay = pygame.Surface((WIDTH - 40, 360), pygame.SRCALPHA)
+        overlay.fill((255, 255, 255, 230))
+        panel_rect = overlay.get_rect(center=(WIDTH//2, HEIGHT//2))
+        self.screen.blit(overlay, panel_rect)
+        center_x = WIDTH // 2
+        center_y = HEIGHT // 2
+        go_text = self.big_font.render("GAME OVER", True, BLACK)
+        score_text = self.font.render(f"Score Final: {self.score}", True, BLACK)
+        self.screen.blit(go_text, go_text.get_rect(center=(center_x, center_y - 120)))
+        self.screen.blit(score_text, score_text.get_rect(center=(center_x, center_y - 60)))
+        stats_y = center_y + 40
+        gap_x = 120
+        pygame.draw.circle(self.screen, GREEN, (center_x - gap_x, stats_y), 25)
+        t1 = self.font.render(f"{self.counts['folha']}", True, BLACK)
+        self.screen.blit(t1, t1.get_rect(center=(center_x - gap_x, stats_y + 40)))
+        pygame.draw.circle(self.screen, BLUE, (center_x, stats_y), 25)
+        t2 = self.font.render(f"{self.counts['aguape']}", True, BLACK)
+        self.screen.blit(t2, t2.get_rect(center=(center_x, stats_y + 40)))
+        pygame.draw.circle(self.screen, ORANGE, (center_x + gap_x, stats_y), 25)
+        t3 = self.font.render(f"{self.counts['manga']}", True, BLACK)
+        self.screen.blit(t3, t3.get_rect(center=(center_x + gap_x, stats_y + 40)))
+        hint = self.small_font.render("Espaço para Reiniciar", True, (80,80,80))
+        self.screen.blit(hint, hint.get_rect(center=(center_x, center_y + 110)))
+        self.btn_exit_over.draw(self.screen)
+
+    def run(self):
+        while True:
+            dt_ms = self.clock.tick(FPS)
+            dt = dt_ms / 1000.0
+            self.handle_events()
+            self.update(dt)
+            if not self.started:
+                self.draw_start()
+            elif self.game_over and self.entering_name:
+                self.draw_name_input()
+            elif self.game_over:
+                self.draw_game_over()
+            else:
+                self.draw_game()    
+            pygame.display.flip()
+
+if __name__ == "__main__":
+    game = Game()
+    game.run()
