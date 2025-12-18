@@ -1,15 +1,16 @@
+
 import pygame
 import sys
 import random
 import math
 import os
 
-# --- Configurações Gerais ---
+# Configurações Gerais
 WIDTH, HEIGHT = 1280, 720
 FPS = 60
 SCORE_FILE = "scores.txt"
 
-# --- Cores ---
+# Cores
 WHITE = (255, 255, 255)
 BLACK = (20, 20, 20)
 GREEN = (80, 200, 120)
@@ -27,8 +28,11 @@ RED_UI = (220, 50, 50)
 BUTTON_COLOR = (200, 60, 60)
 BUTTON_HOVER = (230, 90, 90)
 SHIELD_COLOR = (0, 255, 255)
+CLOCK_COLOR = (70, 20, 130)
 GREY_TEXT = (100, 100, 100)
 GOLD_TEXT = (255, 215, 0)
+SILVER_TEXT = (160, 160, 160)
+BRONZE_TEXT = (205, 127, 50)
 BIRD_COLOR = (50, 50, 65)
 
 SKY_DAY = (120, 200, 255)
@@ -36,19 +40,19 @@ SKY_SUNSET = (255, 120, 80)
 SKY_NIGHT = (10, 10, 35)
 
 # Cores das Montanhas
-MOUNTAIN_FAR = (160, 180, 210)  # Azul claro acinzentado (atmosfera)
-MOUNTAIN_NEAR = (110, 125, 155) # Azul mais escuro
+MOUNTAIN_FAR = (160, 180, 210)  # Azul claro acinzentado (pra de longe)
+MOUNTAIN_NEAR = (110, 125, 155) # Azul mais escuro (pra de perto)
 CLOUD_MAIN_COLOR = (240, 248, 255) 
 CLOUD_SHADOW_COLOR = (200, 220, 240)
 
-# --- Padrões de Nuvem (Pixel Art) ---
+# Padrões de Nuvem
 CLOUD_PATTERNS = [
     ["  WW   ", " WWWW  ", "BBBBBB ", "BBBBBB "],
     ["   WW    ", "  WWWW   ", " BBBBBB  ", "BBBBBBBB ", " BBBBBB  "],
     [" W   W ", "WWW WWW", "BBBBBBB", " BBBBB "]
 ]
 
-# --- Configurações de Jogo ---
+# Configurações de Jogo
 CAPY_X = 180
 CAPY_RADIUS = 24 
 PIPE_WIDTH = 80
@@ -63,6 +67,7 @@ MAX_DROP_SPEED = 1000.0
 # Dificuldade
 PIPE_GAP_DEFAULT = 220
 SPAWN_DISTANCE_START = 500
+INITIAL_SPEED = 300
 MAX_SPEED = 900.0
 
 # Valores Base
@@ -70,7 +75,7 @@ VALOR_FOLHA = 5
 VALOR_AGUAPE = 50
 VALOR_MANGA = 500
 
-# --- Classes ---
+# Classes
 
 class FloatingText:
     def __init__(self, x, y, text, color):
@@ -163,7 +168,6 @@ class Particle:
             pygame.draw.circle(s, rgba, (self.radius, self.radius), self.radius)
             surface.blit(s, (int(self.x - self.radius), int(self.y - self.radius)))
 
-# --- NOVA CLASSE MONTANHA ---
 class Mountain:
     def __init__(self, x, layer_type):
         self.type = layer_type
@@ -250,7 +254,7 @@ class Bird:
 
 class PowerUp:
     def __init__(self, x, pipe_gap_mid, relative_y):
-        self.type = "shield"
+        self.type = random.choice(["shield", "clock"])
         self.x = x
         self.rel_y = relative_y 
         self.y = pipe_gap_mid + self.rel_y
@@ -278,6 +282,18 @@ class PowerUp:
         font = pygame.font.SysFont(None, 24)
         txt = font.render("S", True, BLACK)
         surface.blit(txt, txt.get_rect(center=(int(self.x), int(self.y))))
+        if self.type == "clock":
+            pygame.draw.circle(surface, (180, 180, 255), (int(self.x), int(self.y)), self.radius)
+            pygame.draw.circle(surface, WHITE, (int(self.x), int(self.y)), self.radius, 2)
+
+            # ponteiros
+            pygame.draw.line(surface, BLACK,
+                            (self.x, self.y),
+                            (self.x, self.y - 8), 2)
+            pygame.draw.line(surface, BLACK,
+                            (self.x, self.y),
+                            (self.x + 6, self.y), 2)
+
 
 class Collectible:
     def __init__(self, item_type, x, pipe_gap_mid, relative_y):
@@ -329,66 +345,83 @@ class Collectible:
             pygame.draw.line(surface, BROWN, (cx, cy - draw_rad), (cx, cy - draw_rad - 5), 3)
 
 class Capivara:
-    def __init__(self, x=CAPY_X, y=HEIGHT//2):
-        self.x = x
-        self.y = y
-        self.radius = CAPY_RADIUS
-        self.vel = 0.0
-        self.alive = True
+    def __init__(self):
+        self.x = 100
+        self.y = 300
+        self.vel = 0
+
+        # física / estado
+        self.radius = 25
         self.rotation = 0
+        self.alive = True
+
+        # escudo / imunidade
         self.has_shield = False
         self.immunity_timer = 0.0
-        self.shadow_surf = pygame.Surface((60, 20), pygame.SRCALPHA)
-        pygame.draw.ellipse(self.shadow_surf, (0, 0, 0, 60), (0, 0, 60, 20))
+
+        # sprites
+        self.frame_parado = pygame.image.load(
+            "imagens/capivaravoadoraparada.png"
+        ).convert_alpha()
+
+        self.frame_voando = pygame.image.load(
+            "imagens/capivaravoando.png"
+        ).convert_alpha()
+
+        self.frame_parado = pygame.transform.scale(self.frame_parado, (64, 48))
+        self.frame_voando = pygame.transform.scale(self.frame_voando, (64, 48))
+
+        self.frames = [self.frame_parado, self.frame_voando]
+        self.frame_index = 0
+        self.anim_timer = 0
+        self.image = self.frames[0]
 
     def jump(self):
         self.vel = JUMP_VELOCITY
-    
+
     def dive(self):
         self.vel = DIVE_VELOCITY
 
     def update(self, dt):
+        # gravidade e movimento
         self.vel += GRAVITY * dt
         if self.vel > MAX_DROP_SPEED:
             self.vel = MAX_DROP_SPEED
         self.y += self.vel * dt
-        if self.y < self.radius:
-            self.y = self.radius
-            self.vel = 0
-            
-        target_rot = max(-30, min(30, -self.vel * 0.05))
-        self.rotation += (target_rot - self.rotation) * 0.1
 
-        if self.immunity_timer > 0: self.immunity_timer -= dt
+        # rotação baseada na velocidade (visual)
+        self.rotation = max(-30, min(30, -self.vel * 0.05))
+
+        # imunidade temporária
+        if self.immunity_timer > 0:
+            self.immunity_timer -= dt
+            if self.immunity_timer < 0:
+                self.immunity_timer = 0
+
+        # animação
+        self.anim_timer += dt
+        if self.anim_timer > 0.12:
+            self.anim_timer = 0
+            self.frame_index = (self.frame_index + 1) % len(self.frames)
+            self.image = self.frames[self.frame_index]
 
     def get_rect(self):
-        hitbox_radius = self.radius - 4
-        return pygame.Rect(int(self.x - hitbox_radius), int(self.y - hitbox_radius),
-                           int(hitbox_radius*2), int(hitbox_radius*2))
+        hitbox_radius = self.radius - 6
+        return pygame.Rect(
+            int(self.x - hitbox_radius),
+            int(self.y - hitbox_radius),
+            hitbox_radius * 2,
+            hitbox_radius * 2
+        )
 
     def draw(self, surface):
-        if self.immunity_timer > 0 and int(self.immunity_timer * 15) % 2 == 0: return
-
-        surface.blit(self.shadow_surf, (self.x - 30, self.y + 20))
+        rot_image = pygame.transform.rotate(self.image, self.rotation)
+        rect = rot_image.get_rect(center=(int(self.x), int(self.y)))
+        surface.blit(rot_image, rect)
+        # escudo visual
         if self.has_shield:
             pygame.draw.circle(surface, (0, 255, 255, 100), (int(self.x), int(self.y)), self.radius + 12, 3)
 
-        body_rect = pygame.Rect(self.x - 25, self.y - 20, 50, 40)
-        pygame.draw.ellipse(surface, BROWN, body_rect)
-        head_pos = (int(self.x + 15), int(self.y - 10))
-        pygame.draw.circle(surface, BROWN, head_pos, 16)
-        
-        focinho_rect = pygame.Rect(self.x + 25, self.y - 12, 10, 12)
-        try: pygame.draw.rect(surface, BROWN_DARK, focinho_rect, border_top_right_radius=5, border_bottom_right_radius=5)
-        except TypeError: pygame.draw.rect(surface, BROWN_DARK, focinho_rect)
-
-        pygame.draw.circle(surface, BROWN_DARK, (int(self.x + 5), int(self.y - 22)), 6)
-        pygame.draw.circle(surface, WHITE, (int(self.x + 18), int(self.y - 14)), 5)
-        pygame.draw.circle(surface, BLACK, (int(self.x + 20), int(self.y - 14)), 2)
-
-        wing_rect = pygame.Rect(self.x - 15, self.y - 15, 20, 15)
-        pygame.draw.ellipse(surface, (230, 230, 230), wing_rect)
-        pygame.draw.ellipse(surface, BLACK, wing_rect, 1)
 
 
 class Pipe:
@@ -516,7 +549,10 @@ class Ground:
 class Game:
     def __init__(self):
         pygame.init()
-        pygame.display.set_caption("Capivara Voadora")
+        pygame.display.set_caption("Flappybara")
+        self.entering_name = False
+        self.player_name = ""
+        self.saved_this_session = False
         self.screen = pygame.display.set_mode((WIDTH, HEIGHT))
         self.clock = pygame.time.Clock()
         self.font = pygame.font.SysFont(None, 40)
@@ -528,20 +564,69 @@ class Game:
         self.reset()
 
     def load_scores(self):
-        if not os.path.exists(SCORE_FILE): return []
+        if not os.path.exists(SCORE_FILE):
+            return []
+
+        scores = []
         try:
             with open(SCORE_FILE, "r") as f:
-                scores = [int(line.strip()) for line in f.readlines() if line.strip()]
-            return sorted(scores, reverse=True)[:5]
-        except: return []
+                for line in f:
+                    if "," in line:
+                        user, score = line.strip().split(",")
+                        scores.append({"user": user, "score": int(score)})
+        except:
+            pass
+        return sorted(scores, key=lambda x: x["score"], reverse=True)[:10]
 
-    def save_score(self, score):
-        self.top_scores.append(score)
-        self.top_scores = sorted(self.top_scores, reverse=True)[:5]
+    def save_score(self, user, score):
+        self.top_scores.append({"user": user, "score": score})
+        self.top_scores = sorted(self.top_scores, key=lambda x: x["score"], reverse=True)[:10]
+
         try:
             with open(SCORE_FILE, "w") as f:
-                for s in self.top_scores: f.write(f"{s}\n")
-        except: pass
+                for s in self.top_scores:
+                    f.write(f"{s['user']},{s['score']}\n")
+        except:
+            pass
+
+    def is_new_record(self, score):
+        if len(self.top_scores) < 10:
+            return True
+        return score > self.top_scores[-1]["score"]
+
+    def draw_blur_background(self):
+        small = pygame.transform.smoothscale(self.screen, (WIDTH // 10, HEIGHT // 10))
+        blur = pygame.transform.smoothscale(small, (WIDTH, HEIGHT))
+        self.screen.blit(blur, (0, 0))
+
+    def draw_name_input(self):
+        self.draw_game()
+        self.draw_blur_background() 
+
+        panel = pygame.Surface((500, 260), pygame.SRCALPHA)
+        panel.fill((255, 255, 255, 230))
+        rect = panel.get_rect(center=(WIDTH // 2, HEIGHT // 2))
+        self.screen.blit(panel, rect)
+
+        title = self.big_font.render("PARABÉNS!", True, BLACK)
+        self.screen.blit(title, title.get_rect(center=(WIDTH//2, HEIGHT//2 - 80)))
+
+        score_txt = self.font.render(f"Score: {self.score}", True, BLACK)
+        self.screen.blit(score_txt, score_txt.get_rect(center=(WIDTH//2, HEIGHT//2 - 40)))
+
+        prompt = self.small_font.render("Digite seu User Cin:", True, GREY_TEXT)
+        self.screen.blit(prompt, prompt.get_rect(center=(WIDTH//2, HEIGHT//2)))
+
+        name_box = pygame.Rect(WIDTH//2 - 120, HEIGHT//2 + 20, 240, 40)
+        pygame.draw.rect(self.screen, WHITE, name_box, border_radius=6)
+        pygame.draw.rect(self.screen, BLACK, name_box, 2, border_radius=6)
+
+        name_txt = self.font.render(self.player_name.upper(), True, BLACK)
+        self.screen.blit(name_txt, name_txt.get_rect(center=name_box.center))
+
+        hint = self.small_font.render("ENTER para confirmar", True, GREY_TEXT)
+        self.screen.blit(hint, hint.get_rect(center=(WIDTH//2, HEIGHT//2 + 80)))
+
 
     def interpolate_color(self, start_color, end_color, factor):
         return (
@@ -567,6 +652,9 @@ class Game:
         self.floating_texts = [] 
         self.clouds = [Cloud(random.randint(0, WIDTH)) for _ in range(5)]
         self.birds = [Bird() for _ in range(3)]
+        self.entering_name = False
+        self.player_name = ""
+        self.saved_this_session = False
         
         # Gera Montanhas Iniciais (Fundo e Frente)
         self.mountains_far = []
@@ -594,10 +682,17 @@ class Game:
         self.shake_duration = 0 
         self.level_up_flash = 0 
         self.base_speed = 300
-        self.current_speed = 300
+        self.current_speed = INITIAL_SPEED
         self.multiplier = 1
         first_pipe = Pipe(WIDTH + 50, PIPE_GAP_DEFAULT, self.multiplier)
         self.pipes.append(first_pipe)
+        # relogio
+        self.slow_timer = 0.0
+        self.slow_duration = 10.0  # segundos
+        self.slow_factor = 2/3     # 2/3 da velocidade normal
+        # escudo
+        self.shield_timer = 0.0
+        self.shield_duration = 25.0
 
     def spawn_pipe(self):
         gap = max(160, PIPE_GAP_DEFAULT - (self.multiplier * 5))
@@ -606,8 +701,78 @@ class Game:
 
     def handle_events(self):
         mouse_pos = pygame.mouse.get_pos()
-        if not self.started: self.btn_exit_start.check_hover(mouse_pos)
-        if self.game_over: self.btn_exit_over.check_hover(mouse_pos)
+
+        if not self.started:
+            self.btn_exit_start.check_hover(mouse_pos)
+        if self.game_over:
+            self.btn_exit_over.check_hover(mouse_pos)
+
+        for e in pygame.event.get():
+            if e.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+
+            # --------- INPUT DE NOME (TEM PRIORIDADE) ---------
+            if self.entering_name:
+                if e.type == pygame.KEYDOWN:
+                    if e.key == pygame.K_RETURN and self.player_name:
+                        self.save_score(self.player_name.upper(), self.score)
+                        self.saved_this_session = True
+                        self.entering_name = False
+
+                    elif e.key == pygame.K_BACKSPACE:
+                        self.player_name = self.player_name[:-1]
+
+                    elif len(self.player_name) < 8:
+                        if e.unicode.isalnum():
+                            self.player_name += e.unicode
+                continue  # ⬅️ MUITO IMPORTANTE: bloqueia resto do input
+
+            # --------- BOTÕES ---------
+            if not self.started and self.btn_exit_start.is_clicked(e):
+                pygame.quit()
+                sys.exit()
+
+            if self.game_over and self.btn_exit_over.is_clicked(e):
+                pygame.quit()   
+                sys.exit()
+
+            # --------- TECLADO ---------
+            if e.type == pygame.KEYDOWN:
+                if e.key in (pygame.K_SPACE, pygame.K_UP):
+                    if not self.started:
+                        self.started = True
+                        self.capy.jump()
+                    elif self.game_over and not self.entering_name:
+                        self.reset()
+                    else:
+                        self.capy.jump()
+                        for _ in range(4):
+                            self.particles.append(Particle(self.capy.x, self.capy.y + 10))
+
+                elif e.key == pygame.K_r and self.game_over:
+                    self.reset()
+
+                elif e.key in (pygame.K_DOWN, pygame.K_s) and self.started and not self.game_over:
+                    self.capy.dive()
+
+            # --------- MOUSE ---------
+            elif e.type == pygame.MOUSEBUTTONDOWN:
+                clicked_ui = False
+                if not self.started and self.btn_exit_start.rect.collidepoint(e.pos):
+                    clicked_ui = True
+                if self.game_over and self.btn_exit_over.rect.collidepoint(e.pos):
+                    clicked_ui = True
+
+                if not clicked_ui:
+                    if not self.started:
+                        self.started = True
+                        self.capy.jump()
+                    elif self.game_over:
+                        self.reset()
+                    else:
+                        self.capy.jump()
+
 
         for e in pygame.event.get():
             if e.type == pygame.QUIT:
@@ -633,7 +798,8 @@ class Game:
                     self.capy.dive()
             elif e.type == pygame.MOUSEBUTTONDOWN:
                 clicked_ui = False
-                if not self.started and self.btn_exit_start.rect.collidepoint(e.pos): clicked_ui = True
+                if not self.started and self.btn_exit_start.rect.collidepoint(e.pos): 
+                    clicked_ui = True
                 if self.game_over and self.btn_exit_over.rect.collidepoint(e.pos): clicked_ui = True
                 if not clicked_ui:
                     if not self.started:
@@ -678,15 +844,29 @@ class Game:
             self.capy.y = HEIGHT//2 + math.sin(pygame.time.get_ticks() * 0.003) * 20
             return
 
+        if (self.game_over and not self.saved_this_session and not self.entering_name and self.is_new_record(self.score)):
+            self.entering_name = True
         if self.game_over:
-            if not self.saved_this_session:
-                self.save_score(self.score)
-                self.saved_this_session = True
-                self.shake_duration = 10 
-            if self.shake_duration > 0: self.shake_duration -= 1
+            if self.shake_duration > 0:
+                self.shake_duration -= 1
             return
 
+
         self.time += dt
+        # efeito relogio
+        speed_multiplier = 1.0
+        if self.slow_timer > 0:
+            self.slow_timer -= dt
+            speed_multiplier = self.slow_factor
+            if self.slow_timer < 0:
+                self.slow_timer = 0
+        # efeito escudo
+        if self.shield_timer > 0:
+            self.shield_timer -= dt
+            # quando o tempo acabar, desativa o escudo
+            if self.shield_timer <= 0:
+                self.shield_timer = 0
+                self.capy.has_shield = False
         if self.shake_duration > 0: self.shake_duration -= 1
         if self.level_up_flash > 0: self.level_up_flash -= 5
         if self.current_speed < MAX_SPEED: self.current_speed += 4 * dt
@@ -711,7 +891,10 @@ class Game:
             if last_pipe.x < WIDTH - dist: self.spawn_pipe()
 
         for pipe in list(self.pipes):
-            pipe.update(dt, self.current_speed)
+            effective_speed = self.current_speed * speed_multiplier
+            if effective_speed > INITIAL_SPEED:
+                effective_speed = INITIAL_SPEED
+            pipe.update(dt, effective_speed)
             if pipe.collides_with(self.capy.get_rect()):
                 if self.capy.immunity_timer <= 0:
                     if self.capy.has_shield:
@@ -728,7 +911,11 @@ class Game:
                     p.collected = True
                     if p.type == "shield":
                         self.capy.has_shield = True
+                        self.shield_timer = self.shield_duration # reinicia o tempo
                         self.floating_texts.append(FloatingText(self.capy.x, self.capy.y - 40, "ESCUDO!", SHIELD_COLOR))
+                    elif p.type == "clock":
+                        self.slow_timer = self.slow_duration
+                        self.floating_texts.append(FloatingText(self.capy.x, self.capy.y - 40, "TEMPO LENTO!", CLOCK_COLOR))
             for c in pipe.collectibles:
                 if not c.collected and c.rect.colliderect(self.capy.get_rect()):
                     c.collected = True
@@ -738,19 +925,28 @@ class Game:
                     color = WHITE
                     if c.type == "manga": 
                         color = GOLD_TEXT
+                        moeda3.play()
                         for _ in range(15):
                             col = random.choice([RED_UI, YELLOW, ORANGE, WHITE])
                             self.particles.append(Particle(c.x, c.y, col, True))
-                    elif c.type == "aguape": color = BLUE
-                    elif c.type == "folha": color = GREEN
+                    elif c.type == "aguape": 
+                        color = BLUE
+                        moeda2.play()  
+                    elif c.type == "folha": 
+                        color = GREEN
+                        moeda1.play()
                     self.floating_texts.append(FloatingText(self.capy.x, self.capy.y - 30, f"+{points}", color))
             if pipe.off_screen(): self.pipes.remove(pipe)
 
         if self.capy.y + self.capy.radius >= HEIGHT - GROUND_HEIGHT:
+            game_over.play()
             self.capy.y = HEIGHT - GROUND_HEIGHT - self.capy.radius
             self.game_over = True
             self.capy.alive = False
             self.shake_duration = 20
+        if (self.game_over and not self.saved_this_session and not self.entering_name and self.is_new_record(self.score)):
+            victory.play()
+            self.entering_name = True
 
     def draw_hud_ingame(self):
         hud_bg = pygame.Surface((200, 150), pygame.SRCALPHA)
@@ -775,6 +971,23 @@ class Game:
         pygame.draw.circle(self.screen, ORANGE, (panel_x + 10, panel_y + 70), 10)
         txt_m = self.small_font.render(f"x {self.counts['manga']}", True, BLACK)
         self.screen.blit(txt_m, (panel_x + 30, panel_y + 62))
+        # hud relogio
+        if self.slow_timer > 0:
+            txt = self.small_font.render(
+                f"TEMPO LENTO: {int(self.slow_timer)}s",
+                True,
+                (70, 20, 130)
+            )
+            self.screen.blit(txt, (20, 170))
+        # hud escudo
+        if self.shield_timer > 0:
+            txt = self.small_font.render(
+                f"ESCUDO: {int(self.shield_timer)}s",
+                True,
+                SHIELD_COLOR
+            )
+            self.screen.blit(txt, (20, 195))
+
 
     def draw_start(self):
         self.screen.fill(SKY_DAY)
@@ -786,8 +999,8 @@ class Game:
         self.ground.draw(self.screen)
         self.capy.draw(self.screen)
         
-        title = self.big_font.render("Capivara Voadora", True, BLACK)
-        title_shadow = self.big_font.render("Capivara Voadora", True, (200, 200, 200))
+        title = self.big_font.render("Flappybara", True, BLACK)
+        title_shadow = self.big_font.render("Flappybara", True, (200, 200, 200))
         center_x = WIDTH//2
         title_rect = title.get_rect(center=(center_x, HEIGHT//3))
         self.screen.blit(title_shadow, (title_rect.x+2, title_rect.y+2))
@@ -803,11 +1016,30 @@ class Game:
             txt = self.small_font.render("Sem recordes ainda...", True, GREY_TEXT)
             self.screen.blit(txt, txt.get_rect(center=(center_x, board_y)))
         else:
-            for i, s in enumerate(self.top_scores):
-                color = (255, 215, 0) if i == 0 else BLACK 
-                txt = self.small_font.render(f"{i+1}. {s}", True, color)
-                self.screen.blit(txt, txt.get_rect(center=(center_x, board_y + i*25)))
-        self.btn_exit_start.draw(self.screen)
+            left_x = center_x - 260
+            right_x = center_x + 40
+            start_y = board_y
+
+            for i, entry in enumerate(self.top_scores):
+                col_x = left_x if i < 5 else right_x
+                y = start_y + (i % 5) * 26
+                if i == 0:
+                    color = GOLD_TEXT
+                elif i == 1:
+                    color = SILVER_TEXT
+                elif i == 2:
+                    color = BRONZE_TEXT
+                else:
+                    color = BLACK
+
+                txt = self.small_font.render(
+                    f"{i+1:>2}. {entry['user']:<8} {entry['score']}",
+                    True,
+                    color
+                )
+                self.screen.blit(txt, (col_x, y))
+
+
 
     def draw_game(self):
         self.screen.fill(self.get_sky_color())
@@ -883,10 +1115,33 @@ class Game:
             dt = dt_ms / 1000.0
             self.handle_events()
             self.update(dt)
-            if not self.started: self.draw_start()
-            elif self.game_over: self.draw_game_over()
-            else: self.draw_game()
+            if not self.started:
+                self.draw_start()
+            elif self.game_over and self.entering_name:
+                self.draw_name_input()
+            elif self.game_over:
+                self.draw_game_over()
+            else:
+                self.draw_game()    
             pygame.display.flip()
+
+# Música principal
+pygame.init()
+pygame.mixer.init()
+pygame.mixer.music.load('Soundtrack/fight_looped.mp3')
+pygame.mixer.music.set_volume(0.3)
+pygame.mixer.music.play(-1)
+
+# Outros sons
+moeda1 = pygame.mixer.Sound('Soundtrack/Coin01.mp3')
+moeda2 = pygame.mixer.Sound('Soundtrack/Coin02.mp3')
+moeda3 = pygame.mixer.Sound('Soundtrack/Coin03.mp3')
+moeda1.play()
+shield = pygame.mixer.Sound('Soundtrack/shield.mp3')
+clock = pygame.mixer.Sound('Soundtrack/Clock.mp3')
+colidiu = pygame.mixer.Sound('Soundtrack/colidiu.mp3')
+victory = pygame.mixer.Sound('Soundtrack/Victory.mp3')
+game_over = pygame.mixer.Sound('Soundtrack/Game over.mp3')
 
 if __name__ == "__main__":
     game = Game()
