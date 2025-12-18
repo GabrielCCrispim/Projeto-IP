@@ -1,550 +1,20 @@
-
 import pygame
-import sys
 import random
 import math
+import sys
 import os
 
-# Configurações Gerais
-WIDTH, HEIGHT = 1280, 720
-FPS = 60
-SCORE_FILE = "scores.txt"
 
-# Cores
-WHITE = (255, 255, 255)
-BLACK = (20, 20, 20)
-GREEN = (80, 200, 120)
-GREEN_PIPE = (80, 200, 120)
-GREEN_DARK = (30, 100, 30)
-GREEN_LIGHT = (120, 230, 150)
-BROWN = (120, 85, 60)
-BROWN_DARK = (80, 50, 30)
-YELLOW = (255, 210, 50)
-BLUE = (70, 150, 200)
-ORANGE = (255, 160, 40)
-RED_UI = (220, 50, 50)
-
-# Cores Novas
-BUTTON_COLOR = (200, 60, 60)
-BUTTON_HOVER = (230, 90, 90)
-SHIELD_COLOR = (0, 255, 255)
-CLOCK_COLOR = (70, 20, 130)
-GREY_TEXT = (100, 100, 100)
-GOLD_TEXT = (255, 215, 0)
-SILVER_TEXT = (160, 160, 160)
-BRONZE_TEXT = (205, 127, 50)
-BIRD_COLOR = (50, 50, 65)
-
-SKY_DAY = (120, 200, 255)
-SKY_SUNSET = (255, 120, 80)
-SKY_NIGHT = (10, 10, 35)
-
-# Cores das Montanhas
-MOUNTAIN_FAR = (160, 180, 210)  # Azul claro acinzentado (pra de longe)
-MOUNTAIN_NEAR = (110, 125, 155) # Azul mais escuro (pra de perto)
-CLOUD_MAIN_COLOR = (240, 248, 255) 
-CLOUD_SHADOW_COLOR = (200, 220, 240)
-
-# Padrões de Nuvem
-CLOUD_PATTERNS = [
-    ["  WW   ", " WWWW  ", "BBBBBB ", "BBBBBB "],
-    ["   WW    ", "  WWWW   ", " BBBBBB  ", "BBBBBBBB ", " BBBBBB  "],
-    [" W   W ", "WWW WWW", "BBBBBBB", " BBBBB "]
-]
-
-# Configurações de Jogo
-CAPY_X = 180
-CAPY_RADIUS = 24 
-PIPE_WIDTH = 80
-GROUND_HEIGHT = 100
-
-# Física
-GRAVITY = 1500.0
-JUMP_VELOCITY = -420.0
-DIVE_VELOCITY = 700.0
-MAX_DROP_SPEED = 1000.0
-
-# Dificuldade
-PIPE_GAP_DEFAULT = 220
-SPAWN_DISTANCE_START = 500
-INITIAL_SPEED = 300
-MAX_SPEED = 900.0
-
-# Valores Base
-VALOR_FOLHA = 5
-VALOR_AGUAPE = 50
-VALOR_MANGA = 500
-
-# Classes
-
-class FloatingText:
-    def __init__(self, x, y, text, color):
-        self.x = x
-        self.y = y
-        self.text = text
-        self.color = color
-        self.timer = 0
-        self.max_time = 60 
-        self.font = pygame.font.SysFont(None, 32, bold=True)
-
-    def update(self):
-        self.y -= 1.5 
-        self.timer += 1
-
-    def draw(self, surface):
-        if self.timer < self.max_time:
-            alpha = 255 - int((self.timer / self.max_time) * 255)
-            text_surf = self.font.render(self.text, True, self.color)
-            text_surf.set_alpha(alpha)
-            shadow_surf = self.font.render(self.text, True, BLACK)
-            shadow_surf.set_alpha(alpha)
-            surface.blit(shadow_surf, (self.x + 2, self.y + 2))
-            surface.blit(text_surf, (self.x, self.y))
-
-class Button:
-    def __init__(self, x, y, width, height, text, font, color, hover_color):
-        self.rect = pygame.Rect(x, y, width, height)
-        self.text = text
-        self.font = font
-        self.color = color
-        self.hover_color = hover_color
-        self.is_hovered = False
-
-    def check_hover(self, mouse_pos):
-        self.is_hovered = self.rect.collidepoint(mouse_pos)
-
-    def is_clicked(self, event):
-        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-            if self.rect.collidepoint(event.pos):
-                return True
-        return False
-
-    def draw(self, surface):
-        color = self.hover_color if self.is_hovered else self.color
-        shadow_rect = self.rect.copy()
-        shadow_rect.y += 4
-        try:
-            pygame.draw.rect(surface, (50, 20, 20), shadow_rect, border_radius=12)
-            pygame.draw.rect(surface, color, self.rect, border_radius=12)
-            pygame.draw.rect(surface, WHITE, self.rect, 2, border_radius=12)
-        except TypeError:
-            pygame.draw.rect(surface, (50, 20, 20), shadow_rect)
-            pygame.draw.rect(surface, color, self.rect)
-            pygame.draw.rect(surface, WHITE, self.rect, 2)
-
-        text_surf = self.font.render(self.text, True, WHITE)
-        text_rect = text_surf.get_rect(center=self.rect.center)
-        surface.blit(text_surf, text_rect)
-
-class Particle:
-    def __init__(self, x, y, color=WHITE, explosive=False):
-        self.x = x
-        self.y = y
-        self.color = color
-        self.radius = random.randint(3, 6)
-        self.life = 255
-        self.decay = random.randint(10, 20)
-        
-        if explosive:
-            speed = random.randint(100, 300)
-            angle = random.uniform(0, 6.28)
-            self.vx = math.cos(angle) * speed
-            self.vy = math.sin(angle) * speed
-            self.decay = random.randint(5, 10)
-        else:
-            self.vx = -random.randint(50, 150)
-            self.vy = random.randint(-50, 50)
-
-    def update(self, dt):
-        self.x += self.vx * dt
-        self.y += self.vy * dt
-        self.life -= self.decay
-        if self.life < 0: self.life = 0
-
-    def draw(self, surface):
-        if self.life > 0:
-            s = pygame.Surface((self.radius*2, self.radius*2), pygame.SRCALPHA)
-            rgba = self.color + (self.life,)
-            pygame.draw.circle(s, rgba, (self.radius, self.radius), self.radius)
-            surface.blit(s, (int(self.x - self.radius), int(self.y - self.radius)))
-
-class Mountain:
-    def __init__(self, x, layer_type):
-        self.type = layer_type
-        self.x = x
-        
-        if self.type == 'far':
-            self.color = MOUNTAIN_FAR
-            self.width = random.randint(300, 600)
-            self.height = random.randint(250, 450)
-            self.scroll_factor = 0.05 # 5% da velocidade (muito lento)
-            self.y_base = HEIGHT - GROUND_HEIGHT + 20 
-            # Picos mais irregulares
-            self.peak_offset = random.randint(-50, 50)
-        else: # near
-            self.color = MOUNTAIN_NEAR
-            self.width = random.randint(200, 400)
-            self.height = random.randint(100, 250)
-            self.scroll_factor = 0.15 # 15% da velocidade
-            self.y_base = HEIGHT - GROUND_HEIGHT + 10
-            self.peak_offset = 0
-
-    def update(self, dt, game_speed):
-        self.x -= game_speed * self.scroll_factor * dt
-
-    def draw(self, surface):
-        # Desenha um triângulo (montanha)
-        points = [
-            (self.x, self.y_base),  # Canto esquerdo
-            (self.x + self.width // 2 + self.peak_offset, self.y_base - self.height), # Pico
-            (self.x + self.width, self.y_base) # Canto direito
-        ]
-        pygame.draw.polygon(surface, self.color, points)
-
-class Cloud:
-    def __init__(self, x=None):
-        self.x = x if x is not None else random.randint(WIDTH, WIDTH + 400)
-        self.y = random.randint(20, HEIGHT // 2)
-        self.speed = random.randint(15, 40)
-        self.pattern = random.choice(CLOUD_PATTERNS)
-        self.pixel_size = random.randint(25, 45)
-        self.width = len(self.pattern[0]) * self.pixel_size
-
-    def update(self, dt):
-        self.x -= self.speed * dt
-
-    def draw(self, surface):
-        for row_index, row in enumerate(self.pattern):
-            for col_index, char in enumerate(row):
-                rect_x = self.x + col_index * self.pixel_size
-                rect_y = self.y + row_index * self.pixel_size
-                rect = pygame.Rect(rect_x, rect_y, self.pixel_size, self.pixel_size)
-                
-                if char == 'W':
-                    pygame.draw.rect(surface, CLOUD_MAIN_COLOR, rect)
-                elif char == 'B':
-                    pygame.draw.rect(surface, CLOUD_SHADOW_COLOR, rect)
-
-class Bird:
-    def __init__(self):
-        self.direction = random.choice([-1, 1])
-        if self.direction == 1: self.x = -50
-        else: self.x = WIDTH + 50
-        self.y = random.randint(30, HEIGHT // 3)
-        self.speed = random.randint(70, 140)
-        self.size = random.randint(10, 20)
-        self.flap_timer = 0
-        self.wing_state = 0 
-
-    def update(self, dt):
-        self.x += self.speed * self.direction * dt
-        self.flap_timer += dt
-        if self.flap_timer > 0.2:
-            self.flap_timer = 0
-            self.wing_state = 1 - self.wing_state
-
-    def draw(self, surface):
-        cx, cy = self.x, self.y
-        wing_span = self.size
-        if self.wing_state == 0:
-            points = [(cx - wing_span, cy - 5), (cx, cy + 2), (cx + wing_span, cy - 5)]
-        else:
-            points = [(cx - wing_span, cy - 2), (cx, cy + 4), (cx + wing_span, cy - 2)]
-        pygame.draw.lines(surface, BIRD_COLOR, False, points, 3)
-
-class PowerUp:
-    def __init__(self, x, pipe_gap_mid, relative_y):
-        self.type = random.choice(["shield", "clock"])
-        self.x = x
-        self.rel_y = relative_y 
-        self.y = pipe_gap_mid + self.rel_y
-        self.radius = 18
-        self.collected = False
-        self.rect = pygame.Rect(x - self.radius, self.y - self.radius, self.radius*2, self.radius*2)
-        self.float_offset = 0
-        self.pulse_timer = 0
-
-    def update(self, dt, speed, current_pipe_mid):
-        self.x -= speed * dt
-        self.float_offset += 5 * dt
-        self.pulse_timer += dt * 3
-        base_y = current_pipe_mid + self.rel_y
-        self.y = base_y + math.sin(self.float_offset) * 3
-        self.rect.x = int(self.x - self.radius)
-        self.rect.y = int(self.y - self.radius)
-
-    def draw(self, surface):
-        if self.collected: return
-        pulse = 2 + math.sin(self.pulse_timer) * 2
-        pygame.draw.circle(surface, SHIELD_COLOR, (int(self.x), int(self.y)), self.radius)
-        pygame.draw.circle(surface, WHITE, (int(self.x), int(self.y)), self.radius + int(pulse), 1)
-        pygame.draw.circle(surface, WHITE, (int(self.x), int(self.y)), self.radius - 4, 1)
-        font = pygame.font.SysFont(None, 24)
-        txt = font.render("S", True, BLACK)
-        surface.blit(txt, txt.get_rect(center=(int(self.x), int(self.y))))
-        if self.type == "clock":
-            pygame.draw.circle(surface, (180, 180, 255), (int(self.x), int(self.y)), self.radius)
-            pygame.draw.circle(surface, WHITE, (int(self.x), int(self.y)), self.radius, 2)
-
-            # ponteiros
-            pygame.draw.line(surface, BLACK,
-                            (self.x, self.y),
-                            (self.x, self.y - 8), 2)
-            pygame.draw.line(surface, BLACK,
-                            (self.x, self.y),
-                            (self.x + 6, self.y), 2)
-
-
-class Collectible:
-    def __init__(self, item_type, x, pipe_gap_mid, relative_y):
-        self.type = item_type
-        self.x = x
-        self.rel_y = relative_y 
-        self.y = pipe_gap_mid + self.rel_y
-        self.collected = False
-        self.pulse_timer = random.random() * 10
-        
-        if self.type == "folha":
-            self.radius = 16
-            self.base_value = VALOR_FOLHA
-        elif self.type == "aguape":
-            self.radius = 20
-            self.base_value = VALOR_AGUAPE
-        else:
-            self.radius = 24
-            self.base_value = VALOR_MANGA
-
-        self.rect = pygame.Rect(int(self.x - self.radius), int(self.y - self.radius),
-                               int(self.radius*2), int(self.radius*2))
-
-    def update_position(self, x, current_pipe_mid):
-        self.x = x
-        self.y = current_pipe_mid + self.rel_y
-        self.rect.x = int(self.x - self.radius)
-        self.rect.y = int(self.y - self.radius)
-
-    def draw(self, surface):
-        if self.collected: return
-        self.pulse_timer += 0.1
-        pulse = math.sin(self.pulse_timer) * 2
-        draw_rad = self.radius + pulse
-        cx, cy = int(self.x), int(self.y)
-
-        if self.type == "folha":
-            points = [(cx, cy - draw_rad), (cx + draw_rad, cy + draw_rad/2), (cx, cy + draw_rad), (cx - draw_rad, cy + draw_rad/2)]
-            pygame.draw.polygon(surface, GREEN, points)
-            pygame.draw.polygon(surface, WHITE, points, 1)
-        elif self.type == "aguape":
-            pygame.draw.circle(surface, BLUE, (cx, cy), draw_rad)
-            pygame.draw.circle(surface, (100, 200, 255), (cx, cy), draw_rad-5)
-            pygame.draw.circle(surface, YELLOW, (cx, cy), 4) 
-        else: 
-            rect_manga = pygame.Rect(cx - draw_rad*0.8, cy - draw_rad, draw_rad*1.6, draw_rad*2)
-            pygame.draw.ellipse(surface, ORANGE, rect_manga)
-            pygame.draw.ellipse(surface, (255, 200, 100), (cx - draw_rad*0.4, cy - draw_rad*0.6, draw_rad*0.5, draw_rad*0.8))
-            pygame.draw.line(surface, BROWN, (cx, cy - draw_rad), (cx, cy - draw_rad - 5), 3)
-
-class Capivara:
-    def __init__(self):
-        self.x = 100
-        self.y = 300
-        self.vel = 0
-
-        # física / estado
-        self.radius = 25
-        self.rotation = 0
-        self.alive = True
-
-        # escudo / imunidade
-        self.has_shield = False
-        self.immunity_timer = 0.0
-
-        # sprites
-        self.frame_parado = pygame.image.load(
-            "imagens/capivaravoadoraparada.png"
-        ).convert_alpha()
-
-        self.frame_voando = pygame.image.load(
-            "imagens/capivaravoando.png"
-        ).convert_alpha()
-
-        self.frame_parado = pygame.transform.scale(self.frame_parado, (64, 48))
-        self.frame_voando = pygame.transform.scale(self.frame_voando, (64, 48))
-
-        self.frames = [self.frame_parado, self.frame_voando]
-        self.frame_index = 0
-        self.anim_timer = 0
-        self.image = self.frames[0]
-
-    def jump(self):
-        self.vel = JUMP_VELOCITY
-
-    def dive(self):
-        self.vel = DIVE_VELOCITY
-
-    def update(self, dt):
-        # gravidade e movimento
-        self.vel += GRAVITY * dt
-        if self.vel > MAX_DROP_SPEED:
-            self.vel = MAX_DROP_SPEED
-        self.y += self.vel * dt
-
-        # rotação baseada na velocidade (visual)
-        self.rotation = max(-30, min(30, -self.vel * 0.05))
-
-        # imunidade temporária
-        if self.immunity_timer > 0:
-            self.immunity_timer -= dt
-            if self.immunity_timer < 0:
-                self.immunity_timer = 0
-
-        # animação
-        self.anim_timer += dt
-        if self.anim_timer > 0.12:
-            self.anim_timer = 0
-            self.frame_index = (self.frame_index + 1) % len(self.frames)
-            self.image = self.frames[self.frame_index]
-
-    def get_rect(self):
-        hitbox_radius = self.radius - 6
-        return pygame.Rect(
-            int(self.x - hitbox_radius),
-            int(self.y - hitbox_radius),
-            hitbox_radius * 2,
-            hitbox_radius * 2
-        )
-
-    def draw(self, surface):
-        rot_image = pygame.transform.rotate(self.image, self.rotation)
-        rect = rot_image.get_rect(center=(int(self.x), int(self.y)))
-        surface.blit(rot_image, rect)
-        # escudo visual
-        if self.has_shield:
-            pygame.draw.circle(surface, (0, 255, 255, 100), (int(self.x), int(self.y)), self.radius + 12, 3)
-
-
-
-class Pipe:
-    def __init__(self, x, gap_size, multiplier):
-        self.x = x
-        self.width = PIPE_WIDTH
-        self.passed = False
-        self.gap = gap_size
-        margin = 80
-        self.gap_mid = random.randint(margin + self.gap//2, HEIGHT - GROUND_HEIGHT - margin - self.gap//2)
-        self.top_y = self.gap_mid - self.gap//2
-        self.bottom_y = self.gap_mid + self.gap//2
-        self.collectibles = []
-        self.powerups = []
-        self.moving = False
-        self.move_speed = 0
-        self.move_dir = 1
-        
-        if multiplier >= 3 and random.random() < 0.6: 
-            self.moving = True
-            self.move_speed = random.randint(40, 120)
-            self.move_dir = random.choice([-1, 1])
-
-        cx = self.x + self.width / 2
-        chance = random.random()
-        
-        if random.random() < 0.05 and not self.moving:
-            self.powerups.append(PowerUp(cx, self.gap_mid, 0))
-        else:
-            if chance < 0.10: 
-                item_type = "manga"
-                offset = (self.gap // 2) - 30 
-                direction = random.choice([-1, 1])
-                self.collectibles.append(Collectible(item_type, cx, self.gap_mid, offset * direction))
-            elif chance < 0.40:
-                item_type = "aguape"
-                offset = random.choice([-30, 30, 0])
-                self.collectibles.append(Collectible(item_type, cx, self.gap_mid, offset))
-            elif chance < 0.90:
-                item_type = "folha"
-                for i in [-1, 0, 1]:
-                    offset = i * 30
-                    self.collectibles.append(Collectible(item_type, cx, self.gap_mid, offset))
-
-    def update(self, dt, speed):
-        self.x -= speed * dt
-        if self.moving:
-            self.gap_mid += self.move_speed * self.move_dir * dt
-            if random.random() < 0.02: self.move_speed = random.randint(40, 150)
-            margin = 80
-            top_limit = margin + self.gap//2
-            bot_limit = HEIGHT - GROUND_HEIGHT - margin - self.gap//2
-            if self.gap_mid < top_limit:
-                self.gap_mid = top_limit
-                self.move_dir = 1
-                self.move_speed = random.randint(50, 100)
-            elif self.gap_mid > bot_limit:
-                self.gap_mid = bot_limit
-                self.move_dir = -1
-                self.move_speed = random.randint(50, 100)
-            self.top_y = self.gap_mid - self.gap//2
-            self.bottom_y = self.gap_mid + self.gap//2
-
-        cx = self.x + self.width / 2
-        for c in self.collectibles:
-            if not c.collected: c.update_position(cx, self.gap_mid)
-        for p in self.powerups:
-            if not p.collected: p.update(dt, speed, self.gap_mid)
-
-    def off_screen(self): return self.x + self.width < -50
-    def collides_with(self, rect):
-        top_rect = pygame.Rect(int(self.x), 0, self.width, int(self.top_y))
-        bottom_rect = pygame.Rect(int(self.x), int(self.bottom_y), self.width,
-                                 int(HEIGHT - self.bottom_y - GROUND_HEIGHT))
-        return rect.colliderect(top_rect) or rect.colliderect(bottom_rect)
-
-    def draw(self, surface):
-        top_rect = pygame.Rect(int(self.x), 0, self.width, int(self.top_y))
-        pygame.draw.rect(surface, GREEN_PIPE, top_rect)
-        pygame.draw.rect(surface, GREEN_DARK, top_rect, 4)
-        pygame.draw.rect(surface, GREEN_LIGHT, (self.x + 10, 0, 10, self.top_y))
-        
-        cap_height = 25
-        top_cap = pygame.Rect(self.x - 5, self.top_y - cap_height, self.width + 10, cap_height)
-        pygame.draw.rect(surface, GREEN_PIPE, top_cap)
-        pygame.draw.rect(surface, GREEN_DARK, top_cap, 4)
-
-        bottom_rect = pygame.Rect(int(self.x), int(self.bottom_y), self.width,
-                                 int(HEIGHT - self.bottom_y - GROUND_HEIGHT))
-        pygame.draw.rect(surface, GREEN_PIPE, bottom_rect)
-        pygame.draw.rect(surface, GREEN_DARK, bottom_rect, 4)
-        pygame.draw.rect(surface, GREEN_LIGHT, (self.x + 10, self.bottom_y, 10, HEIGHT))
-        
-        bot_cap = pygame.Rect(self.x - 5, self.bottom_y, self.width + 10, cap_height)
-        pygame.draw.rect(surface, GREEN_PIPE, bot_cap)
-        pygame.draw.rect(surface, GREEN_DARK, bot_cap, 4)
-
-        for c in self.collectibles: c.draw(surface)
-        for p in self.powerups: p.draw(surface)
-
-class Ground:
-    def __init__(self):
-        self.y = HEIGHT - GROUND_HEIGHT
-        self.x1 = 0
-        self.x2 = WIDTH
-
-    def update(self, dt, current_speed):
-        dx = current_speed * dt
-        self.x1 -= dx
-        self.x2 -= dx
-        if self.x1 + WIDTH <= 0: self.x1 = self.x2 + WIDTH
-        if self.x2 + WIDTH <= 0: self.x2 = self.x1 + WIDTH
-
-    def draw(self, surface):
-        pygame.draw.rect(surface, BROWN, (0, self.y, WIDTH, GROUND_HEIGHT))
-        offset1 = int(self.x1 % 40)
-        offset2 = int(self.x2 % 40)
-        for i in range(0, WIDTH, 40):
-            pygame.draw.circle(surface, BROWN_DARK, (i + offset1, self.y + 30), 4)
-            pygame.draw.circle(surface, BROWN_DARK, (i + offset2, self.y + 60), 6)
-        pygame.draw.rect(surface, GREEN_PIPE, (0, self.y, WIDTH, 15))
-        pygame.draw.line(surface, GREEN_LIGHT, (0, self.y), (WIDTH, self.y), 3)
-
+from Config import *
+from Class.Button import Button
+from Class.Ground import Ground
+from Class.Cloud import Cloud
+from Class.Capivara import Capivara
+from Class.Pipe import Pipe
+from Class.Mountain import Mountain
+from Class.Particle import Particle
+from Class.FloatingText import FloatingText
+from Class.Bird import Bird
 
 class Game:
     def __init__(self):
@@ -890,12 +360,12 @@ class Game:
             dist = max(350, SPAWN_DISTANCE_START - (self.time * 3))
             if last_pipe.x < WIDTH - dist: self.spawn_pipe()
 
-        for pipe in list(self.pipes):
+        for Pipe in list(self.pipes):
             effective_speed = self.current_speed * speed_multiplier
             if effective_speed > INITIAL_SPEED:
                 effective_speed = INITIAL_SPEED
-            pipe.update(dt, effective_speed)
-            if pipe.collides_with(self.capy.get_rect()):
+            Pipe.update(dt, effective_speed)
+            if Pipe.collides_with(self.capy.get_rect()):
                 if self.capy.immunity_timer <= 0:
                     if self.capy.has_shield:
                         self.capy.has_shield = False
@@ -906,7 +376,7 @@ class Game:
                     else:
                         self.game_over = True
                         self.capy.alive = False
-            for p in pipe.powerups:
+            for p in Pipe.powerups:
                 if not p.collected and p.rect.colliderect(self.capy.get_rect()):
                     p.collected = True
                     if p.type == "shield":
@@ -916,7 +386,7 @@ class Game:
                     elif p.type == "clock":
                         self.slow_timer = self.slow_duration
                         self.floating_texts.append(FloatingText(self.capy.x, self.capy.y - 40, "TEMPO LENTO!", CLOCK_COLOR))
-            for c in pipe.collectibles:
+            for c in Pipe.collectibles:
                 if not c.collected and c.rect.colliderect(self.capy.get_rect()):
                     c.collected = True
                     points = c.base_value * self.multiplier
@@ -936,7 +406,7 @@ class Game:
                         color = GREEN
                         moeda1.play()
                     self.floating_texts.append(FloatingText(self.capy.x, self.capy.y - 30, f"+{points}", color))
-            if pipe.off_screen(): self.pipes.remove(pipe)
+            if Pipe.off_screen(): self.pipes.remove(Pipe)
 
         if self.capy.y + self.capy.radius >= HEIGHT - GROUND_HEIGHT:
             game_over.play()
@@ -1069,7 +539,7 @@ class Game:
         for c in self.clouds: c.draw(self.screen)
         for b in self.birds: b.draw(self.screen)
         
-        for pipe in self.pipes: pipe.draw(self.screen)
+        for Pipe in self.pipes: Pipe.draw(self.screen)
         for p in self.particles: p.draw(self.screen)
         for ft in self.floating_texts: ft.draw(self.screen)
         self.capy.draw(self.screen)
@@ -1124,25 +594,3 @@ class Game:
             else:
                 self.draw_game()    
             pygame.display.flip()
-
-# Música principal
-pygame.init()
-pygame.mixer.init()
-pygame.mixer.music.load('Soundtrack/fight_looped.mp3')
-pygame.mixer.music.set_volume(0.3)
-pygame.mixer.music.play(-1)
-
-# Outros sons
-moeda1 = pygame.mixer.Sound('Soundtrack/Coin01.mp3')
-moeda2 = pygame.mixer.Sound('Soundtrack/Coin02.mp3')
-moeda3 = pygame.mixer.Sound('Soundtrack/Coin03.mp3')
-moeda1.play()
-shield = pygame.mixer.Sound('Soundtrack/shield.mp3')
-clock = pygame.mixer.Sound('Soundtrack/Clock.mp3')
-colidiu = pygame.mixer.Sound('Soundtrack/colidiu.mp3')
-victory = pygame.mixer.Sound('Soundtrack/Victory.mp3')
-game_over = pygame.mixer.Sound('Soundtrack/Game over.mp3')
-
-if __name__ == "__main__":
-    game = Game()
-    game.run()
