@@ -196,7 +196,7 @@ class Game:
                     elif len(self.player_name) < 8:
                         if e.unicode.isalnum():
                             self.player_name += e.unicode
-                continue  # ⬅️ MUITO IMPORTANTE: bloqueia resto do input
+                continue
 
             # --------- BOTÕES ---------
             if not self.started and self.btn_exit_start.is_clicked(e):

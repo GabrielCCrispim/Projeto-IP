@@ -29,7 +29,7 @@ class Pipe:
         cx = self.x + self.width / 2
         chance = random.random()
         
-        if random.random() < 0.05 and not self.moving:
+        if random.random() < 0.12 and not self.moving:
             self.powerups.append(PowerUp(cx, self.gap_mid, 0))
         else:
             if chance < 0.10: 
@@ -37,11 +37,11 @@ class Pipe:
                 offset = (self.gap // 2) - 30 
                 direction = random.choice([-1, 1])
                 self.collectibles.append(Collectible(item_type, cx, self.gap_mid, offset * direction))
-            elif chance < 0.40:
+            elif chance < 0.35:
                 item_type = "aguape"
                 offset = random.choice([-30, 30, 0])
                 self.collectibles.append(Collectible(item_type, cx, self.gap_mid, offset))
-            elif chance < 0.90:
+            elif chance < 0.85:
                 item_type = "folha"
                 for i in [-1, 0, 1]:
                     offset = i * 30
